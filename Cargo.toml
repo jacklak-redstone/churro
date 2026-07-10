@@ -1,0 +1,23 @@
+[package]
+name = "churro"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["jacklak-redstone (jacklak)"]
+description = "A Rust crate to make Chatto bots."
+documentation = "https://docs.rs/churro"
+repository = "https://github.com/jacklak-redstone/churro"
+
+[dependencies]
+buffa = { version = "0.8.1", features = ["json"] }
+buffa-descriptor = { version = "0.8.1", features = ["json"] }
+buffa-types = { version = "0.8.1", features = ["json"] }
+connectrpc = { version = "0.8.1", features = ["client", "client-tls"] }
+http = "1.4.2"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["full"] }
+webpki-roots = "1.0.8"
+
+[build-dependencies]
+connectrpc-build = "0.8"
+walkdir = "2.5.0"

@@ -1,0 +1,3 @@
+[submodule "chatto"]
+	path = chatto
+	url = https://github.com/chattocorp/chatto.git
