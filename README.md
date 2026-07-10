@@ -1,1 +1,1 @@
-A very early version of a Rust crate to make [Chatto](https://chatto.run) bots. Currently just protocol bindings for now.
+A very early version of a Rust crate to make [Chatto](https://chatto.run) bots.
