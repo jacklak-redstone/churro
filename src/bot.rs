@@ -1,25 +1,32 @@
+use buffa::Message as _;
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, HttpClient};
 use connectrpc::rustls::ClientConfig as TLSConfig;
 use connectrpc::rustls::RootCertStore;
+use futures_util::SinkExt;
+use futures_util::stream::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
+use tokio_tungstenite::tungstenite::Message as WSMessage;
 
 use crate::proto::chatto::admin::v1::*;
+use crate::proto::chatto::api::v1::get_user_request::Target;
 use crate::proto::chatto::api::v1::*;
 use crate::proto::chatto::auth::v1::*;
 use crate::proto::chatto::discovery::v1::*;
+use crate::proto::chatto::realtime::v1::realtime_event_envelope::Event;
+use crate::proto::chatto::realtime::v1::*;
+use crate::{CResult, ChurroError, Ctx, EventHandler};
 
-use std::error::Error;
-use std::fmt;
-use std::fmt::Formatter;
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct Bot {
     token: String,
     user_id: String,
     username: String,
-    conn: HttpClient,
+    server_url: String,
     // Auth Service
     pub external_identity_auth_service: ExternalIdentityAuthServiceClient<HttpClient>,
     // Admin Services
@@ -52,6 +59,7 @@ pub struct Bot {
 
 #[derive(Deserialize)]
 struct LoginResult {
+    #[allow(unused)]
     success: bool,
     token: String,
     user: LoginUser,
@@ -63,27 +71,34 @@ struct LoginUser {
     login: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct LoginError {
-    error: String,
-}
-
-impl Error for LoginError {}
-
-impl fmt::Display for LoginError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.error)
+#[inline(always)]
+fn to_rt_frame<T: Into<realtime_client_frame::Frame>>(v: T) -> RealtimeClientFrame {
+    RealtimeClientFrame {
+        frame: Some(v.into()),
+        ..Default::default()
     }
 }
 
 impl Bot {
-    pub async fn login(
-        username: &str,
-        password: &str,
-        server: &str,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn username(&self) -> String {
+        self.username.clone()
+    }
+
+    pub fn user_id(&self) -> String {
+        self.user_id.clone()
+    }
+
+    /// Login to the Chatto server.
+    /// Currently only supports https and wss. Most servers should be using those anyway.
+    /// # Example
+    /// ```rust
+    /// let bot = Bot::login("bob", "bobs_password", "chat.example.com").await?;
+    /// ```
+    pub async fn login(username: &str, password: &str, server: &str) -> CResult<Self> {
+        let https_url = format!("https://{}", server);
+
         let resp = Client::new()
-            .post(format!("{}/auth/login", server))
+            .post(format!("{}/auth/login", https_url))
             .json(&json!({
                 "login": username,
                 "password": password,
@@ -91,12 +106,7 @@ impl Bot {
             .send()
             .await?;
 
-        let status = resp.status();
         let body = resp.text().await?;
-
-        if !status.is_success() {
-            return Err(Box::new(serde_json::from_str::<LoginError>(&body)?));
-        }
 
         let result: LoginResult = serde_json::from_str(&body)?;
 
@@ -111,7 +121,7 @@ impl Bot {
 
         let conn = HttpClient::with_tls(tls_config.into());
 
-        let config = ClientConfig::new(format!("{}/api/connect", server).parse()?)
+        let config = ClientConfig::new(format!("{}/api/connect", https_url).parse()?)
             .with_protocol(Protocol::Connect)
             .with_default_header("Authorization", format!("Bearer {}", token.clone()));
 
@@ -119,7 +129,7 @@ impl Bot {
             token,
             user_id: result.user.id,
             username: result.user.login,
-            conn: conn.clone(),
+            server_url: server.to_string(),
             // Auth
             external_identity_auth_service: ExternalIdentityAuthServiceClient::new(
                 conn.clone(),
@@ -167,5 +177,203 @@ impl Bot {
             // Discovery
             discovery_service: ServerDiscoveryServiceClient::new(conn.clone(), config.clone()),
         })
+    }
+
+    /// Starts listening to events, using the given EventHandler.
+    /// This will create a websocket connection, so expect some delay.
+    pub async fn start_listening(&self, handler: impl EventHandler) -> CResult {
+        let bot = Arc::new(self.clone());
+        let handler = Arc::new(handler);
+
+        let (mut sender, mut recvr) =
+            tokio_tungstenite::connect_async(format!("wss://{}/api/realtime", self.server_url))
+                .await?
+                .0
+                .split();
+        sender
+            .send(WSMessage::Binary(
+                to_rt_frame(RealtimeClientHello {
+                    protocol_version: 1,
+                    bearer_token: Some(self.token.clone()),
+                    ..Default::default()
+                })
+                .encode_to_bytes(),
+            ))
+            .await?;
+        recvr.next().await.ok_or(ChurroError::WebsocketRecv(
+            "couldn't receive server hello".to_string(),
+        ))??;
+        sender
+            .send(WSMessage::Binary(
+                to_rt_frame(RealtimeSubscribeEvents {
+                    ..Default::default()
+                })
+                .encode_to_bytes(),
+            ))
+            .await?;
+        recvr.next().await.ok_or(ChurroError::WebsocketRecv(
+            "couldn't receive initial message".to_string(),
+        ))??;
+        tokio::spawn(async move {
+            while let Some(Ok(m)) = recvr.next().await {
+                let Ok(f) = RealtimeServerFrame::decode_from_slice(&m.into_data()) else {
+                    continue;
+                };
+                let Some(f) = f.frame else { continue };
+                let realtime_server_frame::Frame::Event(e) = f else {
+                    continue;
+                };
+                let Some(event) = e.event else { continue };
+
+                let hdlr = Arc::clone(&handler);
+                let bot_for_hdlr = Arc::clone(&bot);
+
+                let mut ctx = Ctx::with_bot(Arc::clone(&bot));
+
+                tokio::spawn(async move {
+                    match event.clone() {
+                        // we might have to use event in the future
+                        Event::MentionNotification(ev) => {
+                            let (room, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async { bot_for_hdlr.fetch_user(&ev.actor_user_id).await.ok() },
+                            );
+
+                            ctx.room = room;
+                            ctx.user = user;
+
+                            hdlr.bot_mentioned(ctx).await;
+                        }
+
+                        Event::MessagePosted(ev) => {
+                            let (room, message, root_message) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async { bot_for_hdlr.fetch_message_raw(&ev.room_id, &ev.message_event_id).await.ok() },
+                                async { let Some(mid) = &ev.thread_root_event_id else { return None }; bot_for_hdlr.fetch_message_raw(&ev.room_id, mid).await.ok() }
+                            );
+
+                            let user = if let Some(m) = &message {
+                                bot_for_hdlr.fetch_user(&m.actor_id).await.ok()
+                            } else {
+                                None
+                            };
+
+                            ctx.room = room;
+                            ctx.message = message;
+                            ctx.root_message = root_message;
+                            ctx.user = user;
+
+                            hdlr.message_sent(ctx).await;
+                        }
+
+                        _ => {}
+                    }
+                });
+            }
+        });
+        Ok(())
+    }
+
+    pub async fn fetch_room(&self, id: &str) -> CResult<Room> {
+        let room = self
+            .room_directory_service
+            .get_room(GetRoomRequest {
+                room_id: id.to_string(),
+                ..Default::default()
+            })
+            .await?
+            .into_owned()
+            .room
+            .into_option()
+            .and_then(|r| r.room.into_option())
+            .ok_or(ChurroError::ResourceNotFound("room"))?;
+        Ok(room)
+    }
+
+    pub async fn fetch_user(&self, id: &str) -> CResult<User> {
+        let user = self
+            .user_service
+            .get_user(GetUserRequest {
+                target: Some(Target::UserId(id.to_string())),
+                ..Default::default()
+            })
+            .await?
+            .into_owned()
+            .user
+            .into_option()
+            .and_then(|u| u.user.into_option())
+            .ok_or(ChurroError::ResourceNotFound("user"))?;
+        Ok(user)
+    }
+
+    pub async fn fetch_message_raw(&self, room_id: &str, event_id: &str) -> CResult<Message> {
+        let message = self
+            .message_service
+            .get_message(GetMessageRequest {
+                room_id: room_id.to_string(),
+                event_id: event_id.to_string(),
+                ..Default::default()
+            })
+            .await?
+            .into_owned()
+            .message
+            .into_option()
+            .ok_or(ChurroError::ResourceNotFound("message"))?;
+        Ok(message)
+    }
+
+    pub async fn fetch_message(&self, room: &Room, event_id: &str) -> CResult<Message> {
+        self.fetch_message_raw(&room.id, event_id).await
+    }
+
+    pub async fn send_message_raw(&self, room_id: &str, msg: &str) -> CResult {
+        self.message_service
+            .create_message(CreateMessageRequest {
+                room_id: room_id.to_string(),
+                body: msg.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn send_message(&self, room: &Room, msg: &str) -> CResult {
+        self.send_message_raw(&room.id, msg).await
+    }
+
+    pub async fn reply_raw(&self, room_id: &str, id: &str, text: &str) -> CResult {
+        self.message_service
+            .create_message(CreateMessageRequest {
+                room_id: room_id.to_string(),
+                body: text.to_string(),
+                in_reply_to: id.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn reply(&self, msg: &Message, text: &str) -> CResult {
+        self.reply_raw(&msg.room_id, &msg.id, text).await
+    }
+
+    pub async fn set_status(&self, emoji: &str, text: &str) -> CResult {
+        self.my_account_service
+            .update_custom_status(UpdateCustomStatusRequest {
+                emoji: emoji.to_string(),
+                text: text.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_status(&self) -> CResult {
+        self.my_account_service
+            .delete_custom_status(DeleteCustomStatusRequest {
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
     }
 }

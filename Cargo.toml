@@ -1,6 +1,6 @@
 [package]
 name = "churro"
-version = "0.0.2"
+version = "0.0.3-alpha"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["jacklak-redstone (jacklak)"]
@@ -9,15 +9,20 @@ documentation = "https://docs.rs/churro"
 repository = "https://github.com/jacklak-redstone/churro"
 
 [dependencies]
+async-trait = "0.1.89"
 buffa = { version = "0.8.1", features = ["json"] }
 buffa-descriptor = { version = "0.8.1", features = ["json"] }
 buffa-types = { version = "0.8.1", features = ["json"] }
+bytes = "1.12.1"
 connectrpc = { version = "0.8.1", features = ["client", "client-tls"] }
+futures-util = "0.3.32"
 http = "1.4.2"
 reqwest = { version = "0.13.4", features = ["json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 webpki-roots = "1.0.8"
 
 [build-dependencies]
