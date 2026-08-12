@@ -224,15 +224,16 @@ impl Bot {
                     continue;
                 };
                 let Some(event) = e.event else { continue };
-
+                let actor_id = e.actor_id.clone();
                 let hdlr = Arc::clone(&handler);
                 let bot_for_hdlr = Arc::clone(&bot);
 
                 let mut ctx = Ctx::with_bot(Arc::clone(&bot));
 
                 tokio::spawn(async move {
-                    match event.clone() {
-                        // we might have to use event in the future
+                    let actor_id = actor_id.as_deref();
+
+                    match &event {
                         Event::MentionNotification(ev) => {
                             let (room, user) = tokio::join!(
                                 async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
@@ -246,13 +247,32 @@ impl Bot {
                         }
 
                         Event::MessagePosted(ev) => {
-                            let (room, message, root_message) = tokio::join!(
+                            let (room, message, root_message, user) = tokio::join!(
                                 async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
-                                async { bot_for_hdlr.fetch_message_raw(&ev.room_id, &ev.message_event_id).await.ok() },
-                                async { let Some(mid) = &ev.thread_root_event_id else { return None }; bot_for_hdlr.fetch_message_raw(&ev.room_id, mid).await.ok() }
+                                async {
+                                    bot_for_hdlr
+                                        .fetch_message_raw(&ev.room_id, &ev.message_event_id)
+                                        .await
+                                        .ok()
+                                },
+                                async {
+                                    let Some(mid) = &ev.thread_root_event_id else {
+                                        return None;
+                                    };
+                                    bot_for_hdlr.fetch_message_raw(&ev.room_id, mid).await.ok()
+                                },
+                                async {
+                                    if let Some(actor_id) = actor_id {
+                                        bot_for_hdlr.fetch_user(actor_id).await.ok()
+                                    } else {
+                                        None
+                                    }
+                                }
                             );
 
-                            let user = if let Some(m) = &message {
+                            let user = if user.is_none()
+                                && let Some(m) = &message
+                            {
                                 bot_for_hdlr.fetch_user(&m.actor_id).await.ok()
                             } else {
                                 None
@@ -264,6 +284,120 @@ impl Bot {
                             ctx.user = user;
 
                             hdlr.message_sent(ctx).await;
+                        }
+
+                        Event::MessageEdited(ev) => {
+                            let (room, message, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async {
+                                    bot_for_hdlr
+                                        .fetch_message_raw(&ev.room_id, &ev.message_event_id)
+                                        .await
+                                        .ok()
+                                },
+                                async {
+                                    if let Some(actor_id) = actor_id {
+                                        bot_for_hdlr.fetch_user(actor_id).await.ok()
+                                    } else {
+                                        None
+                                    }
+                                }
+                            );
+
+                            let user = if user.is_none()
+                                && let Some(m) = &message
+                            {
+                                bot_for_hdlr.fetch_user(&m.actor_id).await.ok()
+                            } else {
+                                None
+                            };
+
+                            ctx.room = room;
+                            ctx.message = message;
+                            ctx.user = user;
+
+                            hdlr.message_edited(ctx).await;
+                        }
+
+                        Event::MessageRetracted(ev) => {
+                            let (room, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async {
+                                    if let Some(actor_id) = actor_id {
+                                        bot_for_hdlr.fetch_user(actor_id).await.ok()
+                                    } else {
+                                        None
+                                    }
+                                }
+                            );
+
+                            ctx.room = room;
+                            ctx.user = user;
+
+                            hdlr.message_deleted(ctx, &ev.message_event_id.clone())
+                                .await;
+                        }
+
+                        Event::NewDirectMessageNotification(ev) => {
+                            let (room, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async { bot_for_hdlr.fetch_user(&ev.sender_id).await.ok() }
+                            );
+
+                            ctx.room = room;
+                            ctx.user = user;
+
+                            hdlr.dm_started(ctx).await;
+                        }
+
+                        Event::ReactionAdded(ev) => {
+                            let (room, message, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async {
+                                    bot_for_hdlr
+                                        .fetch_message_raw(&ev.room_id, &ev.message_event_id)
+                                        .await
+                                        .ok()
+                                },
+                                async {
+                                    if let Some(actor_id) = actor_id {
+                                        bot_for_hdlr.fetch_user(actor_id).await.ok()
+                                    } else {
+                                        None
+                                    }
+                                }
+                            );
+
+                            ctx.room = room;
+                            ctx.message = message;
+                            ctx.user = user;
+
+                            hdlr.reaction_added(ctx, &ev.emoji.clone()).await;
+                        }
+
+                        Event::ReactionRemoved(ev) => {
+                            let (room, message, user) = tokio::join!(
+                                async { bot_for_hdlr.fetch_room(&ev.room_id).await.ok() },
+                                async {
+                                    bot_for_hdlr
+                                        .fetch_message_raw(&ev.room_id, &ev.message_event_id)
+                                        .await
+                                        .ok()
+                                },
+                                async {
+                                    if let Some(actor_id) = actor_id {
+                                        bot_for_hdlr.fetch_user(actor_id).await.ok()
+                                    } else {
+                                        None
+                                    }
+                                }
+                            );
+
+                            ctx.room = room;
+                            ctx.message = message;
+                            ctx.user = user;
+
+                            hdlr.reaction_removed(ctx, &ev.emoji.clone()).await;
                         }
 
                         _ => {}
@@ -341,20 +475,96 @@ impl Bot {
         self.send_message_raw(&room.id, msg).await
     }
 
-    pub async fn reply_raw(&self, room_id: &str, id: &str, text: &str) -> CResult {
+    pub async fn reply_raw(
+        &self,
+        room_id: &str,
+        id: &str,
+        text: &str,
+        send_to_channel: bool,
+    ) -> CResult {
         self.message_service
             .create_message(CreateMessageRequest {
                 room_id: room_id.to_string(),
                 body: text.to_string(),
                 in_reply_to: id.to_string(),
+                also_send_to_channel: send_to_channel,
                 ..Default::default()
             })
             .await?;
         Ok(())
     }
 
-    pub async fn reply(&self, msg: &Message, text: &str) -> CResult {
-        self.reply_raw(&msg.room_id, &msg.id, text).await
+    pub async fn reply(&self, msg: &Message, text: &str, send_to_channel: bool) -> CResult {
+        self.reply_raw(&msg.room_id, &msg.id, text, send_to_channel)
+            .await
+    }
+
+    pub async fn reply_in_thread_raw(
+        &self,
+        room_id: &str,
+        id: &str,
+        text: &str,
+        send_to_channel: bool,
+    ) -> CResult {
+        self.message_service
+            .create_message(CreateMessageRequest {
+                room_id: room_id.to_string(),
+                body: text.to_string(),
+                thread_root_event_id: id.to_string(),
+                in_reply_to: id.to_string(),
+                also_send_to_channel: send_to_channel,
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn reply_in_thread(
+        &self,
+        msg: &Message,
+        text: &str,
+        send_to_channel: bool,
+    ) -> CResult {
+        if msg.thread_root_event_id.is_empty() {
+            self.reply_in_thread_raw(&msg.room_id, &msg.id, text, send_to_channel)
+                .await
+        } else {
+            self.reply(msg, text, send_to_channel).await
+        }
+    }
+
+    pub async fn send_in_thread_raw(
+        &self,
+        room_id: &str,
+        root_id: &str,
+        text: &str,
+        send_to_channel: bool,
+    ) -> CResult {
+        self.message_service
+            .create_message(CreateMessageRequest {
+                room_id: room_id.to_string(),
+                body: text.to_string(),
+                thread_root_event_id: root_id.to_string(),
+                also_send_to_channel: send_to_channel,
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn send_in_thread(
+        &self,
+        root_msg: &Message,
+        text: &str,
+        send_to_channel: bool,
+    ) -> CResult {
+        let root_id: &str = if root_msg.thread_root_event_id.is_empty() {
+            &root_msg.id
+        } else {
+            &root_msg.thread_root_event_id
+        };
+        self.send_in_thread_raw(&root_msg.room_id, root_id, text, send_to_channel)
+            .await
     }
 
     pub async fn set_status(&self, emoji: &str, text: &str) -> CResult {
@@ -375,5 +585,33 @@ impl Bot {
             })
             .await?;
         Ok(())
+    }
+
+    pub async fn join_room_raw(&self, room_id: &str) -> CResult {
+        self.room_service
+            .join_room(JoinRoomRequest {
+                room_id: room_id.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn join_room(&self, room: &Room) -> CResult {
+        self.join_room_raw(&room.id).await
+    }
+
+    pub async fn leave_room_raw(&self, room_id: &str) -> CResult {
+        self.room_service
+            .leave_room(LeaveRoomRequest {
+                room_id: room_id.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn leave_room(&self, room: &Room) -> CResult {
+        self.leave_room_raw(&room.id).await
     }
 }

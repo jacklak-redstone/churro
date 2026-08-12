@@ -1,6 +1,6 @@
 [package]
 name = "churro"
-version = "0.0.3-alpha"
+version = "0.0.3-alpha2"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["jacklak-redstone (jacklak)"]
