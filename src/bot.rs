@@ -275,7 +275,7 @@ impl Bot {
                             {
                                 bot_for_hdlr.fetch_user(&m.actor_id).await.ok()
                             } else {
-                                None
+                                user
                             };
 
                             ctx.room = room;
@@ -309,7 +309,7 @@ impl Bot {
                             {
                                 bot_for_hdlr.fetch_user(&m.actor_id).await.ok()
                             } else {
-                                None
+                                user
                             };
 
                             ctx.room = room;
