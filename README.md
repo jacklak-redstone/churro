@@ -1,4 +1,4 @@
-A very early version of a Rust crate to make [Chatto](https://chatto.run) bots.
+A very early version of an unofficial Rust crate to make [Chatto](https://chatto.run) bots.
 
 # Examples
 
@@ -38,6 +38,7 @@ async fn main() -> CResult {
 
 # Todo
 
+* More robust everything
 * Have handlers for all events
 * Caching!
 * More functions!
