@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package chatto.api.v1;
 
-import "chatto/api/v1/notification_preferences.proto";
 import "chatto/api/v1/permissions.proto";
 import "chatto/api/v1/users.proto";
 import "google/protobuf/timestamp.proto";
@@ -21,11 +20,16 @@ enum TimeFormat {
 
 // Server-level display settings for the authenticated user.
 message UserSettings {
-  // Optional IANA timezone override. Absent means the client should use the
-  // browser's local timezone.
+  // Optional IANA timezone override. Absent means no choice has been recorded.
+  // Empty means the user explicitly chose the browser's local timezone.
+  // Both use browser-local time; only absence permits automatic device reporting.
   optional string timezone = 1;
   // Preferred time format.
   TimeFormat time_format = 2;
+  // Whether the stored time zone may appear on the user's public profile.
+  // New servers always set this field. Its absence means the server does not
+  // support private time zones and may publish any stored time zone.
+  optional bool share_timezone = 3;
 }
 
 // Current authenticated user's public profile plus self-only settings.
@@ -63,19 +67,19 @@ message ServerViewerPermissions {
 
 // Non-permission server state for the authenticated user.
 message ServerViewerState {
-  // Whether any joined channel room has unread messages.
+  // Whether any joined channel room has neutral Badge attention.
   bool has_unread_rooms = 1;
 }
 
-// Room notification preference for one joined room.
-message RoomNotificationPreference {
-  reserved 2, 3;
-  reserved "level", "effective_level";
-
-  // Room whose preference is represented.
-  string room_id = 1;
-  // Stored and effective notification preference.
-  NotificationPreference preference = 4;
+// State of explicit privileged-mode activation for this authenticated session.
+message PrivilegedModeState {
+  // Whether the user has an elevation-required permission entitlement. This
+  // includes owner entitlement and explicit allows at any supported scope.
+  bool available = 1;
+  // Whether elevated permissions are effective for this session now.
+  bool active = 2;
+  // Absolute activation deadline. Present only while privileged mode is active.
+  google.protobuf.Timestamp expires_at = 3;
 }
 
 // Request for the authenticated viewer snapshot.
@@ -83,18 +87,45 @@ message GetViewerRequest {}
 
 // Authenticated viewer snapshot needed by application shells.
 message GetViewerResponse {
+  reserved 3, 4;
+  reserved "server_notification_preference", "room_notification_preferences";
+
   // Current authenticated user.
   ViewerUser user = 1;
   // Permission-derived capabilities.
   ViewerCapabilities capabilities = 2;
-  // Server-wide notification preference.
-  NotificationPreference server_notification_preference = 3;
-  // Notification preferences for rooms the user participates in.
-  repeated RoomNotificationPreference room_notification_preferences = 4;
   // Effective server/channel permission decisions for the authenticated user.
   ServerViewerPermissions viewer_permissions = 5;
   // Non-permission server state for the authenticated user.
   ServerViewerState viewer_state = 6;
+  // Explicit privilege activation state for this authenticated session.
+  PrivilegedModeState privileged_mode = 7;
+}
+
+// Request to activate all currently entitled elevation-required permissions.
+message ActivatePrivilegedModeRequest {}
+
+// Result of activating privileged mode for the current session.
+message ActivatePrivilegedModeResponse {
+  // Current privileged-mode state after activation.
+  PrivilegedModeState privileged_mode = 1;
+  // Permission-derived capabilities that are effective after activation.
+  ViewerCapabilities capabilities = 2;
+  // Effective server permission decisions after activation.
+  ServerViewerPermissions viewer_permissions = 3;
+}
+
+// Request to deactivate all elevation-required permissions for this session.
+message DeactivatePrivilegedModeRequest {}
+
+// Result of deactivating privileged mode for the current session.
+message DeactivatePrivilegedModeResponse {
+  // Current privileged-mode state after deactivation.
+  PrivilegedModeState privileged_mode = 1;
+  // Permission-derived capabilities that are effective after deactivation.
+  ViewerCapabilities capabilities = 2;
+  // Effective server permission decisions after deactivation.
+  ServerViewerPermissions viewer_permissions = 3;
 }
 
 // Provides authenticated user profile, preferences, and capability state.
@@ -102,4 +133,11 @@ service ViewerService {
   // Returns the current authenticated viewer. This RPC requires a logged-in
   // user; unauthenticated callers receive an UNAUTHENTICATED error.
   rpc GetViewer(GetViewerRequest) returns (GetViewerResponse);
+  // Activates elevation-required permissions for a fixed, non-sliding window.
+  // Returns FAILED_PRECONDITION when the caller is a bot or has no eligible
+  // permission entitlement.
+  rpc ActivatePrivilegedMode(ActivatePrivilegedModeRequest) returns (ActivatePrivilegedModeResponse);
+  // Deactivates elevation-required permissions immediately. Returns
+  // FAILED_PRECONDITION when the caller is a bot.
+  rpc DeactivatePrivilegedMode(DeactivatePrivilegedModeRequest) returns (DeactivatePrivilegedModeResponse);
 }

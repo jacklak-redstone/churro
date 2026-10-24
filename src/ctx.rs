@@ -1,5 +1,6 @@
+use crate::Bot;
 use crate::proto::chatto::api::v1::*;
-use crate::{Bot, CResult, ChurroError};
+use crate::{CResult, ChurroError};
 
 use std::sync::Arc;
 
@@ -26,7 +27,7 @@ impl Ctx {
         let Some(message) = &self.message else {
             return Err(ChurroError::ResourceNotFound("message"));
         };
-        self.bot.reply(message, msg, send_to_channel).await?;
+        self.bot.client.reply(message, msg, send_to_channel).await?;
         Ok(())
     }
 
@@ -35,6 +36,7 @@ impl Ctx {
             return Err(ChurroError::ResourceNotFound("message"));
         };
         self.bot
+            .client
             .reply_in_thread(message, msg, send_to_channel)
             .await?;
         Ok(())
@@ -47,14 +49,15 @@ impl Ctx {
 
         if let Some(message) = &self.message {
             if message.thread_root_event_id.is_empty() {
-                self.bot.send_message(room, msg).await?;
+                self.bot.client.send_message(room, msg).await?;
             } else {
                 self.bot
+                    .client
                     .send_in_thread(message, msg, send_to_channel)
                     .await?;
             }
         } else {
-            self.bot.send_message(room, msg).await?;
+            self.bot.client.send_message(room, msg).await?;
         }
 
         Ok(())
@@ -65,6 +68,7 @@ impl Ctx {
             return Err(ChurroError::ResourceNotFound("message"));
         };
         self.bot
+            .client
             .send_in_thread(message, msg, send_to_channel)
             .await?;
         Ok(())

@@ -40,7 +40,7 @@ syntax = "proto2";
 // [Go](https://github.com/bufbuild/protovalidate-go),
 // [JavaScript/TypeScript](https://github.com/bufbuild/protovalidate-es),
 // [Java](https://github.com/bufbuild/protovalidate-java),
-// [Python](https://github.com/bufbuild/protovalidate-python),
+// [Python](https://github.com/bufbuild/protovalidate-py),
 // or [C++](https://github.com/bufbuild/protovalidate-cc).
 package buf.validate;
 
@@ -88,7 +88,7 @@ extend google.protobuf.FieldOptions {
   //
   // ```proto
   // extend buf.validate.Int32Rules {
-  //   bool is_zero [(buf.validate.predefined).cel = {
+  //   bool is_zero = 1001 [(buf.validate.predefined).cel = {
   //     id: "int32.is_zero",
   //     message: "must be zero",
   //     expression: "!rule || this == 0",
@@ -105,7 +105,7 @@ extend google.protobuf.FieldOptions {
 // `Rule` represents a validation rule written in the Common Expression
 // Language (CEL) syntax. Each Rule includes a unique identifier, an
 // optional error message, and the CEL expression to evaluate. For more
-// information, [see our documentation](https://buf.build/docs/protovalidate/schemas/custom-rules/).
+// information, [see our documentation](https://protovalidate.com/schemas/custom-rules/).
 //
 // ```proto
 // message Foo {
@@ -145,7 +145,7 @@ message MessageRules {
   // simpler syntax when defining CEL Rules where `id` and `message` derived from the `expression`. `id` will
   // be same as the `expression`.
   //
-  // For more information, [see our documentation](https://buf.build/docs/protovalidate/schemas/custom-rules/).
+  // For more information, [see our documentation](https://protovalidate.com/schemas/custom-rules/).
   //
   // ```proto
   // message MyMessage {
@@ -159,7 +159,7 @@ message MessageRules {
   repeated string cel_expression = 5;
   // `cel` is a repeated field of type Rule. Each Rule specifies a validation rule to be applied to this message.
   // These rules are written in Common Expression Language (CEL) syntax. For more information,
-  // [see our documentation](https://buf.build/docs/protovalidate/schemas/custom-rules/).
+  // [see our documentation](https://protovalidate.com/schemas/custom-rules/).
   //
   //
   // ```proto
@@ -256,7 +256,7 @@ message FieldRules {
   // simpler syntax when defining CEL Rules where `id` and `message` derived from the `expression`. `id` will
   // be same as the `expression`.
   //
-  // For more information, [see our documentation](https://buf.build/docs/protovalidate/schemas/custom-rules/).
+  // For more information, [see our documentation](https://protovalidate.com/schemas/custom-rules/).
   //
   // ```proto
   // message MyMessage {
@@ -267,7 +267,7 @@ message FieldRules {
   repeated string cel_expression = 29;
   // `cel` is a repeated field used to represent a textual expression
   // in the Common Expression Language (CEL) syntax. For more information,
-  // [see our documentation](https://buf.build/docs/protovalidate/schemas/custom-rules/).
+  // [see our documentation](https://protovalidate.com/schemas/custom-rules/).
   //
   // ```proto
   // message MyMessage {
@@ -390,7 +390,7 @@ message FieldRules {
 message PredefinedRules {
   // `cel` is a repeated field used to represent a textual expression
   // in the Common Expression Language (CEL) syntax. For more information,
-  // [see our documentation](https://buf.build/docs/protovalidate/schemas/predefined-rules/).
+  // [see our documentation](https://protovalidate.com/schemas/predefined-rules/).
   //
   // ```proto
   // message MyMessage {
@@ -1747,7 +1747,7 @@ message UInt64Rules {
   // message MyUInt64 {
   //   uint64 value = 1 [
   //     (buf.validate.field).uint64.example = 1,
-  //     (buf.validate.field).uint64.example = -10
+  //     (buf.validate.field).uint64.example = 10
   //   ];
   // }
   // ```
@@ -3028,8 +3028,8 @@ message BoolRules {
   // ```proto
   // message MyBool {
   //   bool value = 1 [
-  //     (buf.validate.field).bool.example = 1,
-  //     (buf.validate.field).bool.example = 2
+  //     (buf.validate.field).bool.example = true,
+  //     (buf.validate.field).bool.example = false
   //   ];
   // }
   // ```
@@ -3239,7 +3239,7 @@ message StringRules {
   // ```proto
   // message MyString {
   //   // must be in list ["apple", "banana"]
-  //   string value = 1 [(buf.validate.field).string.in = "apple", (buf.validate.field).string.in = "banana"];
+  //   string value = 1 [(buf.validate.field).string = { in: ["apple", "banana"] }];
   // }
   // ```
   repeated string in = 10 [(predefined).cel = {
@@ -3253,7 +3253,7 @@ message StringRules {
   // ```proto
   // message MyString {
   //   // value must not be in list ["orange", "grape"]
-  //   string value = 1 [(buf.validate.field).string.not_in = "orange", (buf.validate.field).string.not_in = "grape"];
+  //   string value = 1 [(buf.validate.field).string = { not_in: ["orange", "grape"] }];
   // }
   // ```
   repeated string not_in = 11 [(predefined).cel = {
@@ -3476,9 +3476,13 @@ message StringRules {
       }
     ];
 
-    // `uuid` specifies that the field value must be a valid UUID as defined by
-    // [RFC 4122](https://datatracker.ietf.org/doc/html/rfc4122#section-4.1.2). If the
-    // field value isn't a valid UUID, an error message will be generated.
+    // `uuid` specifies that the field value must have the textual shape of a
+    // UUID as defined by
+    // [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562#section-4): 32
+    // hexadecimal digits in five dash-separated groups. Only the shape is
+    // enforced, so that UUID versions defined in the future are not rejected:
+    // the version and variant fields are not checked. If the field value isn't
+    // shaped like a UUID, an error message will be generated.
     //
     // ```proto
     // message MyString {
@@ -3499,10 +3503,13 @@ message StringRules {
       }
     ];
 
-    // `tuuid` (trimmed UUID) specifies that the field value must be a valid UUID as
-    // defined by [RFC 4122](https://datatracker.ietf.org/doc/html/rfc4122#section-4.1.2) with all dashes
-    // omitted. If the field value isn't a valid UUID without dashes, an error message
-    // will be generated.
+    // `tuuid` (trimmed UUID) specifies that the field value must have the
+    // textual shape of a UUID as defined by
+    // [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562#section-4) with all
+    // dashes omitted: 32 hexadecimal digits. Only the shape is enforced, so
+    // that UUID versions defined in the future are not rejected: the version
+    // and variant fields are not checked. If the field value isn't shaped like
+    // a UUID without dashes, an error message will be generated.
     //
     // ```proto
     // message MyString {
@@ -3828,7 +3835,7 @@ message StringRules {
         message: "must be a valid HTTP header name"
         expression:
           "rules.well_known_regex != 1 || this == '' || this.matches(!has(rules.strict) || rules.strict ?"
-          "'^:?[0-9a-zA-Z!#$%&\\'*+-.^_|~\\x60]+$' :"
+          "'^:?[0-9a-zA-Z!#$%&\\'*+.^_|~\\x60-]+$' :"
           "'^[^\\u0000\\u000A\\u000D]+$')"
       },
       (predefined).cel = {
@@ -4025,7 +4032,7 @@ message BytesRules {
   // ```proto
   // message MyBytes {
   //   // value must in ["\x01\x02", "\x02\x03", "\x03\x04"]
-  //   optional bytes value = 1 [(buf.validate.field).bytes.in = {"\x01\x02", "\x02\x03", "\x03\x04"}];
+  //   optional bytes value = 1 [(buf.validate.field).bytes = { in: ["\x01\x02", "\x02\x03", "\x03\x04"] }];
   // }
   // ```
   repeated bytes in = 8 [(predefined).cel = {
@@ -4041,7 +4048,7 @@ message BytesRules {
   // ```proto
   // message MyBytes {
   //   // value must not in ["\x01\x02", "\x02\x03", "\x03\x04"]
-  //   optional bytes value = 1 [(buf.validate.field).bytes.not_in = {"\x01\x02", "\x02\x03", "\x03\x04"}];
+  //   optional bytes value = 1 [(buf.validate.field).bytes = { not_in: ["\x01\x02", "\x02\x03", "\x03\x04"] }];
   // }
   // ```
   repeated bytes not_in = 9 [(predefined).cel = {
@@ -4117,10 +4124,12 @@ message BytesRules {
       }
     ];
 
-    // `uuid` ensures that the field value encodes 128-bit UUID data as defined
-    // by [RFC 4122](https://datatracker.ietf.org/doc/html/rfc4122#section-4.1.2).
-    // The field must contain exactly 16 bytes representing the UUID. If the
-    // field value isn't a valid UUID, an error message will be generated.
+    // `uuid` ensures that the field `value` is exactly 16 bytes long,
+    // the size of a UUID in binary form as defined by
+    // [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562#section-4).
+    // Only the length is enforced: the version and variant fields
+    // are not checked, and any 16 bytes are accepted.
+    // If the field value doesn't meet this rule, an error message is generated.
     //
     // ```proto
     // message MyBytes {
@@ -4258,8 +4267,10 @@ message EnumRules {
   // }
   //
   // message MyMessage {
+  //   MyEnum value = 1 [
   //     (buf.validate.field).enum.example = 1,
   //     (buf.validate.field).enum.example = 2
+  //   ];
   // }
   // ```
   repeated int32 example = 5 [(predefined).cel = {
@@ -4647,7 +4658,7 @@ message DurationRules {
   // message MyDuration {
   //   google.protobuf.Duration value = 1 [
   //     (buf.validate.field).duration.example = { seconds: 1 },
-  //     (buf.validate.field).duration.example = { seconds: 2 },
+  //     (buf.validate.field).duration.example = { seconds: 2 }
   //   ];
   // }
   // ```
@@ -4727,7 +4738,7 @@ message FieldMaskRules {
   // message MyFieldMask {
   //   google.protobuf.FieldMask value = 1 [
   //     (buf.validate.field).field_mask.example = { paths: ["a", "b"] },
-  //     (buf.validate.field).field_mask.example = { paths: ["c.a", "d"] },
+  //     (buf.validate.field).field_mask.example = { paths: ["c.a", "d"] }
   //   ];
   // }
   // ```
@@ -4938,7 +4949,7 @@ message TimestampRules {
   // message MyTimestamp {
   //   google.protobuf.Timestamp value = 1 [
   //     (buf.validate.field).timestamp.example = { seconds: 1672444800 },
-  //     (buf.validate.field).timestamp.example = { seconds: 1672531200 },
+  //     (buf.validate.field).timestamp.example = { seconds: 1672531200 }
   //   ];
   // }
   // ```
@@ -5038,7 +5049,7 @@ message Violation {
   //   bool b = 2 [(buf.validate.field).cel = {
   //     id: "custom_rule",
   //     expression: "!this ? 'b must be true': ''"
-  //   }]
+  //   }];
   // }
   // ```
   //

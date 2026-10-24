@@ -3,29 +3,35 @@ A very early version of a Rust crate to make [Chatto](https://chatto.run) bots.
 # Examples
 
 ```rust
-use churro::{Bot, CResult, Ctx, EventHandler, async_trait};
+use churro::prelude::*;
 
 struct Hdlr;
 
 #[async_trait]
 impl EventHandler for Hdlr {
     async fn message_sent(&self, ctx: Ctx) {
-        let bot = &ctx.bot;
-        let Some(user) = &ctx.user else { return };
-
-        if bot.user_id() == user.id {
+        let Some(user) = &ctx.user else {
             return;
-        }
-
-        ctx.reply("Nice message!");
+        };
+        if user.is_bot() {
+            return;
+        };
+        let _ = ctx.reply("Hello!", false).await;
     }
 }
 
 #[tokio::main]
 async fn main() -> CResult {
-    let bot = Bot::login("bob", "bobs_strong_password", "chat.example.com");
-    bot.start_listening(Hdlr);
+    let bot = Bot::login(
+        "cht_BK_token123",
+        "https://chat.example.com",
+    )
+    .await?;
+
+    bot.listen(Hdlr).await?;
+
     tokio::signal::ctrl_c().await.unwrap();
+
     Ok(())
 }
 ```

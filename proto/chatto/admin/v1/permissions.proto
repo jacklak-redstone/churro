@@ -4,6 +4,7 @@ package chatto.admin.v1;
 
 import "buf/validate/validate.proto";
 import "chatto/api/v1/roles.proto";
+import "chatto/api/v1/pagination.proto";
 
 // Trinary permission decision used by permission matrices and write requests.
 enum PermissionDecision {
@@ -27,13 +28,15 @@ enum PermissionScopeKind {
   PERMISSION_SCOPE_KIND_GROUP = 2;
   // Room tier.
   PERMISSION_SCOPE_KIND_ROOM = 3;
+  // Server-wide direct-message tier.
+  PERMISSION_SCOPE_KIND_DM = 4;
 }
 
 // Permission scope reference.
 message PermissionScope {
   // Scope tier.
   PermissionScopeKind kind = 1 [(buf.validate.field).enum.defined_only = true];
-  // Scope ID for group or room scope. Empty for server scope.
+  // Scope ID for group or room scope. Empty for server or direct-message scope.
   string id = 2;
 }
 
@@ -82,7 +85,7 @@ message GetRolePermissionTierMatrixResponse {
 
 // Matrix column scope.
 message PermissionMatrixScope {
-  // Stable scope ID for the server, a group, or a room.
+  // Stable scope ID for the server, direct messages, a group, or a room.
   string id = 1;
   // Human-readable label.
   string label = 2;
@@ -102,9 +105,12 @@ message PermissionMatrixCell {
   PermissionDecision override = 3;
   // Effective decision at this scope.
   PermissionDecision effective = 4;
+  // Whether an explicit allow may currently be stored for this target. Absent
+  // when no additional delegation ceiling applies.
+  optional bool allow_permitted = 5;
 }
 
-// Permission matrix for one role across all scopes.
+// Complete permission matrix for one role at the matching scopes.
 message RolePermissionMatrix {
   // Role name.
   string role_name = 1;
@@ -118,17 +124,27 @@ message RolePermissionMatrix {
 
 // Request one role's permission matrix.
 message GetRolePermissionMatrixRequest {
+  reserved 3;
+  reserved "page";
   // Stable role name.
   string role_name = 1 [(buf.validate.field).string.min_len = 1];
+  // Include the direct-message scope column. Defaults to false so an older
+  // client does not receive a scope kind that it cannot interpret.
+  bool include_direct_message_scope = 2;
+  // Optional exact scope filter. Omit to read all scopes. Missing or inaccessible scopes produce an empty matrix.
+  // SERVER and DM require an empty ID; GROUP and ROOM require an ID.
+  PermissionScope scope = 4;
 }
 
 // Response containing one role's permission matrix.
 message GetRolePermissionMatrixResponse {
+  reserved 2;
+  reserved "page";
   // Requested matrix.
   RolePermissionMatrix matrix = 1;
 }
 
-// Permission matrix for one user across all scopes.
+// Complete permission matrix for one user at the matching scopes.
 message UserPermissionMatrix {
   // User ID.
   string user_id = 1;
@@ -147,7 +163,7 @@ message UserPermissionMatrix {
 message ScopedPermissionDecision {
   // Permission identifier.
   string permission = 1;
-  // Server, group, or room scope this decision applies to.
+  // Server, direct-message, group, or room scope for this decision.
   PermissionScope scope = 2;
   // Explicit decision stored at this scope.
   PermissionDecision override = 3;
@@ -159,7 +175,7 @@ message ScopedPermissionDecision {
 message PermissionDecisionUpdate {
   // Permission identifier.
   string permission = 1;
-  // Server, group, or room scope this decision applies to.
+  // Server, direct-message, group, or room scope for this decision.
   PermissionScope scope = 2;
   // Stored decision after the write. NONE means no explicit decision remains.
   PermissionDecision decision = 3;
@@ -169,6 +185,13 @@ message PermissionDecisionUpdate {
 message ListRolePermissionDecisionsRequest {
   // Stable role name.
   string role_name = 1 [(buf.validate.field).string.min_len = 1];
+  // Include direct-message decisions. Defaults to false for older clients.
+  bool include_direct_message_scope = 2;
+  // Scope page. Default 20 scopes, maximum 100. Offsets count scopes, not decisions.
+  chatto.api.v1.PageRequest page = 3;
+  // Optional exact scope filter. Missing or inaccessible scopes produce an empty page.
+  // SERVER and DM require an empty ID; GROUP and ROOM require an ID.
+  PermissionScope scope = 4;
 }
 
 // Resource-oriented permission decisions for one role.
@@ -177,12 +200,23 @@ message ListRolePermissionDecisionsResponse {
   string role_name = 1;
   // Permission decisions keyed by permission and typed scope.
   repeated ScopedPermissionDecision decisions = 2;
+  // Total matching scopes and whether another scope page exists.
+  chatto.api.v1.PageInfo page = 3;
+  // Scopes in this page, including scopes with no applicable decisions.
+  repeated PermissionScope scopes = 4;
 }
 
 // Request explicit/effective permission decisions for one user.
 message ListUserPermissionDecisionsRequest {
   // User ID.
   string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Include direct-message decisions. Defaults to false for older clients.
+  bool include_direct_message_scope = 2;
+  // Scope page. Default 20 scopes, maximum 100. Offsets count scopes, not decisions.
+  chatto.api.v1.PageRequest page = 3;
+  // Optional exact scope filter. Missing or inaccessible scopes produce an empty page.
+  // SERVER and DM require an empty ID; GROUP and ROOM require an ID.
+  PermissionScope scope = 4;
 }
 
 // Resource-oriented permission decisions for one user.
@@ -191,6 +225,10 @@ message ListUserPermissionDecisionsResponse {
   string user_id = 1;
   // Permission decisions keyed by permission and typed scope.
   repeated ScopedPermissionDecision decisions = 2;
+  // Total matching scopes and whether another scope page exists.
+  chatto.api.v1.PageInfo page = 3;
+  // Scopes in this page, including scopes with no applicable decisions.
+  repeated PermissionScope scopes = 4;
 }
 
 // Level at which a permission explanation found a decision.
@@ -203,13 +241,15 @@ enum PermissionDecisionLevel {
   PERMISSION_DECISION_LEVEL_GROUP = 2;
   // Room-level role or user decision.
   PERMISSION_DECISION_LEVEL_ROOM = 3;
+  // Direct-message-level role or user decision.
+  PERMISSION_DECISION_LEVEL_DM = 4;
 }
 
 // One explicit decision encountered while explaining a permission.
 message PermissionTraceEntry {
   // Level at which this decision was observed.
   PermissionDecisionLevel level = 1;
-  // Role name or policy marker that produced the decision.
+  // Role name, user ID, or policy marker that produced the decision.
   string role_name = 2;
   // Decision observed at this trace step.
   PermissionDecision decision = 3;
@@ -221,22 +261,29 @@ message PermissionTraceEntry {
 message PermissionExplanation {
   // Permission identifier.
   string permission = 1;
-  // Overall decision after applying deny-wins resolution.
+  // Overall decision after resolving named subjects and the everyone baseline.
   PermissionDecision state = 2;
   // Level of the winning decision, when state is not NONE.
   PermissionDecisionLevel decided_at = 3;
-  // Role name or policy marker that produced the winning decision.
+  // Role name, user ID, or policy marker that produced the winning decision.
   string decided_by_role = 4;
   // Ordered decision trace. The first entry is the winning decision.
   repeated PermissionTraceEntry trace = 5;
+  // Permission whose effective allow includes this permission. Empty when the
+  // permission was resolved directly.
+  string included_by_permission = 6;
 }
 
-// Request permission explanations for a user at server or room scope.
+// Request permission explanations for a user at a typed scope.
 message ExplainPermissionsRequest {
   // User whose permissions should be explained.
   string user_id = 1 [(buf.validate.field).string.min_len = 1];
-  // Optional room scope. Omit for server-scoped permissions.
+  // Legacy room scope. Omit for server-scoped permissions. A request that
+  // also supplies scope must identify the same room.
   string room_id = 2;
+  // Optional typed target. Use DM with an empty ID for direct messages. Omit
+  // for server scope. This field replaces room_id for new clients.
+  PermissionScope scope = 3;
 }
 
 // Permission explanations for all permissions applicable at the requested scope.
@@ -247,12 +294,22 @@ message ExplainPermissionsResponse {
 
 // Request one user's permission matrix.
 message GetUserPermissionMatrixRequest {
+  reserved 3;
+  reserved "page";
   // User ID.
   string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Include the direct-message scope column. Defaults to false so an older
+  // client does not receive a scope kind that it cannot interpret.
+  bool include_direct_message_scope = 2;
+  // Optional exact scope filter. Omit to read all scopes. Missing or inaccessible scopes produce an empty matrix.
+  // SERVER and DM require an empty ID; GROUP and ROOM require an ID.
+  PermissionScope scope = 4;
 }
 
 // Response containing one user's permission matrix.
 message GetUserPermissionMatrixResponse {
+  reserved 2;
+  reserved "page";
   // Requested matrix.
   UserPermissionMatrix matrix = 1;
 }
@@ -299,28 +356,39 @@ message SetUserPermissionResponse {
   PermissionDecisionUpdate decision = 1;
 }
 
-// Provides permission matrix reads and admin permission writes.
+// Provides permission reads and admin permission writes.
+// Matrices return all matching scopes. Decision lists return scope pages.
+// Both use the order SERVER, DM, then each GROUP followed by its ROOM scopes.
+// Groups and rooms follow the configured sidebar order. Only matching scopes are evaluated.
+// Decision pages are live reads; layout or visibility changes can shift offsets. Keep the
+// same filters on each request and advance by the number of returned scopes.
+// A scope filter of DM selects DM even when include_direct_message_scope is false.
 service AdminPermissionService {
-  // Gets the role-permission matrix for a single tier. Requires role.manage
-  // for server/group scope; room scope requires role.manage or room.manage in
-  // that room.
+  // Gets the role-permission matrix for a single tier. Server scope requires
+  // role.manage; group and room scopes require role.manage or effective
+  // room.manage at the requested resource.
   rpc GetRolePermissionTierMatrix(GetRolePermissionTierMatrixRequest) returns (GetRolePermissionTierMatrixResponse);
-  // Gets one role's full permission matrix. Requires role.manage. Returns
+  // Gets a complete role permission matrix. Requires role.manage. Returns
   // NOT_FOUND when the role does not exist.
   rpc GetRolePermissionMatrix(GetRolePermissionMatrixRequest) returns (GetRolePermissionMatrixResponse);
   // Lists one role's permission decisions as resource-oriented rows. Requires
   // role.manage. Returns NOT_FOUND when the role does not exist.
   rpc ListRolePermissionDecisions(ListRolePermissionDecisionsRequest) returns (ListRolePermissionDecisionsResponse);
-  // Gets one user's full permission matrix. Requires user.manage-permissions.
+  // Gets a complete user permission matrix. Human targets require
+  // user.manage-permissions; bot targets require ownership or bot.manage.
   // Returns NOT_FOUND when the user does not exist.
   rpc GetUserPermissionMatrix(GetUserPermissionMatrixRequest) returns (GetUserPermissionMatrixResponse);
-  // Lists one user's permission decisions as resource-oriented rows. Requires
-  // user.manage-permissions. Returns NOT_FOUND when the user does not exist.
+  // Lists one user's permission decisions as resource-oriented rows. Human
+  // targets require user.manage-permissions; bot targets require ownership or
+  // bot.manage. Returns NOT_FOUND when the user does not exist.
   rpc ListUserPermissionDecisions(ListUserPermissionDecisionsRequest) returns (ListUserPermissionDecisionsResponse);
   // Explains permission resolution for another user. Requires role.manage.
   rpc ExplainPermissions(ExplainPermissionsRequest) returns (ExplainPermissionsResponse);
-  // Sets one role permission decision. Requires role.manage or scoped room.manage for room scope.
+  // Sets one role permission decision. Server scope requires role.manage;
+  // group and room scopes also accept effective room.manage at that resource.
   rpc SetRolePermission(SetRolePermissionRequest) returns (SetRolePermissionResponse);
-  // Sets one user permission decision. Requires user.manage-permissions.
+  // Sets one user permission decision. Human targets require
+  // user.manage-permissions; bot targets require ownership or bot.manage and
+  // accept only allow or clear within the bot owner's current authority.
   rpc SetUserPermission(SetUserPermissionRequest) returns (SetUserPermissionResponse);
 }

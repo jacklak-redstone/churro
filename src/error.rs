@@ -16,6 +16,8 @@ pub enum ChurroError {
     WebsocketRecv(String),
     #[error("{0} resource not found")]
     ResourceNotFound(&'static str),
+    #[error("not a url")]
+    NotAUrl,
 }
 
 pub type CResult<T = ()> = Result<T, ChurroError>;
