@@ -374,4 +374,36 @@ impl Client {
         self.send_in_thread_raw(&root_msg.room_id, root_id, text, send_to_channel)
             .await
     }
+
+    pub async fn react_raw(&self, room_id: &str, msg_id: &str, emoji: &str) -> CResult {
+        self.message_service
+            .add_reaction(AddReactionRequest {
+                room_id: room_id.to_string(),
+                message_event_id: msg_id.to_string(),
+                emoji: emoji.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn react(&self, msg: &Message, emoji: &str) -> CResult {
+        self.react_raw(&msg.room_id, &msg.id, emoji).await
+    }
+
+    pub async fn unreact_raw(&self, room_id: &str, msg_id: &str, emoji: &str) -> CResult {
+        self.message_service
+            .remove_reaction(RemoveReactionRequest {
+                room_id: room_id.to_string(),
+                message_event_id: msg_id.to_string(),
+                emoji: emoji.to_string(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn unreact(&self, msg: &Message, emoji: &str) -> CResult {
+        self.unreact_raw(&msg.room_id, &msg.id, emoji).await
+    }
 }

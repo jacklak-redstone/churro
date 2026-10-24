@@ -13,6 +13,7 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// Create a new context containing only the given bot.
     pub fn with_bot(bot: Arc<Bot>) -> Self {
         Self {
             bot,
@@ -23,6 +24,7 @@ impl Ctx {
         }
     }
 
+    /// Send a reply to the current message (if any).
     pub async fn reply(&self, msg: &str, send_to_channel: bool) -> CResult {
         let Some(message) = &self.message else {
             return Err(ChurroError::ResourceNotFound("message"));
@@ -31,6 +33,7 @@ impl Ctx {
         Ok(())
     }
 
+    /// Send a reply in the same thread as the current message.
     pub async fn reply_in_thread(&self, msg: &str, send_to_channel: bool) -> CResult {
         let Some(message) = &self.message else {
             return Err(ChurroError::ResourceNotFound("message"));
@@ -42,6 +45,7 @@ impl Ctx {
         Ok(())
     }
 
+    /// Send a message to the current room, handling thread context.
     pub async fn send(&self, msg: &str, send_to_channel: bool) -> CResult {
         let Some(room) = &self.room else {
             return Err(ChurroError::ResourceNotFound("room"));
@@ -63,6 +67,7 @@ impl Ctx {
         Ok(())
     }
 
+    /// Send a message as a reply in the current thread.
     pub async fn send_in_thread(&self, msg: &str, send_to_channel: bool) -> CResult {
         let Some(message) = &self.message else {
             return Err(ChurroError::ResourceNotFound("message"));
@@ -71,6 +76,14 @@ impl Ctx {
             .client
             .send_in_thread(message, msg, send_to_channel)
             .await?;
+        Ok(())
+    }
+
+    pub async fn react(&self, emoji: &str) -> CResult {
+        let Some(message) = &self.message else {
+            return Err(ChurroError::ResourceNotFound("message"));
+        };
+        self.bot.client.react(message, emoji).await?;
         Ok(())
     }
 }
