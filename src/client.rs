@@ -175,7 +175,9 @@ impl Client {
     }
 
     /// Start a stream of realtime events.
-    pub async fn event_stream(&self) -> CResult<Pin<Box<dyn Stream<Item = RealtimeEvent> + '_>>> {
+    pub async fn event_stream(
+        &self,
+    ) -> CResult<Pin<Box<dyn Stream<Item = RealtimeEvent> + '_ + Send>>> {
         let url = format!(
             "{}://{}/api/realtime",
             if self.secure { "wss" } else { "ws" },
@@ -405,5 +407,64 @@ impl Client {
 
     pub async fn unreact(&self, msg: &Message, emoji: &str) -> CResult {
         self.unreact_raw(&msg.room_id, &msg.id, emoji).await
+    }
+
+    pub async fn thread_messages(&self, msg: &Message) -> CResult<Vec<Message>> {
+        let root_id = if msg.thread_root_event_id.is_empty() {
+            msg.id.clone()
+        } else {
+            msg.thread_root_event_id.clone()
+        };
+        let room_id = msg.room_id.clone();
+        let mut messages: Vec<Message> = Vec::new();
+        let mut cursor: Option<get_thread_events_request::Cursor> = None;
+
+        loop {
+            let mut message_ids = Vec::with_capacity(128);
+
+            let resp = self
+                .thread_service
+                .get_thread_events(GetThreadEventsRequest {
+                    room_id: room_id.clone(),
+                    thread_root_event_id: root_id.clone(),
+                    limit: 128,
+                    cursor: cursor.clone(),
+                    ..Default::default()
+                })
+                .await?
+                .into_owned()
+                .page;
+
+            for event in &resp.events {
+                let Some(room_timeline_event::Event::MessagePosted(e)) = &event.event else {
+                    continue;
+                };
+
+                message_ids.push(e.message.id.clone());
+            }
+
+            let mut msgs = self
+                .message_service
+                .batch_get_messages(BatchGetMessagesRequest {
+                    room_id: room_id.clone(),
+                    event_ids: message_ids,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned()
+                .messages;
+
+            messages.append(&mut msgs);
+
+            cursor = Some(get_thread_events_request::Cursor::After(
+                resp.end_cursor.clone(),
+            ));
+
+            if !resp.has_newer {
+                break;
+            }
+        }
+
+        Ok(messages)
     }
 }
