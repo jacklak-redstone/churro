@@ -42,7 +42,7 @@ pub struct Client {
     pub push_notification_service: PushNotificationServiceClient<HttpClient>,
     pub role_service: RoleServiceClient<HttpClient>,
     pub room_directory_service: RoomDirectoryServiceClient<HttpClient>,
-    //  pub room_invitation_service: RoomInvitationServiceClient<HttpClient>,
+    pub room_invitation_service: RoomInvitationServiceClient<HttpClient>,
     pub room_service: RoomServiceClient<HttpClient>,
     pub server_service: ServerServiceClient<HttpClient>,
     pub thread_service: ThreadServiceClient<HttpClient>,
@@ -50,7 +50,7 @@ pub struct Client {
     pub viewer_service: ViewerServiceClient<HttpClient>,
     pub voice_call_service: VoiceCallServiceClient<HttpClient>,
     // Admin Services
-    pub admin_invite_link_service: AdminInviteLinkServiceClient<HttpClient>,
+    pub admin_invitation_code_service: AdminInvitationCodeServiceClient<HttpClient>,
     pub admin_oauth_client_service: AdminOAuthClientServiceClient<HttpClient>,
     pub admin_diagnostics_service: AdminDiagnosticsServiceClient<HttpClient>,
     pub admin_event_log_service: AdminEventLogServiceClient<HttpClient>,
@@ -103,7 +103,7 @@ impl Client {
             ),
             role_service: RoleServiceClient::new(conn.clone(), config.clone()),
             room_directory_service: RoomDirectoryServiceClient::new(conn.clone(), config.clone()),
-            // room_invitation_service: RoomInvitationServiceClient::new(conn.clone(), config.clone()),
+            room_invitation_service: RoomInvitationServiceClient::new(conn.clone(), config.clone()),
             room_service: RoomServiceClient::new(conn.clone(), config.clone()),
             server_service: ServerServiceClient::new(conn.clone(), config.clone()),
             thread_service: ThreadServiceClient::new(conn.clone(), config.clone()),
@@ -111,7 +111,7 @@ impl Client {
             viewer_service: ViewerServiceClient::new(conn.clone(), config.clone()),
             voice_call_service: VoiceCallServiceClient::new(conn.clone(), config.clone()),
             // Admin
-            admin_invite_link_service: AdminInviteLinkServiceClient::new(
+            admin_invitation_code_service: AdminInvitationCodeServiceClient::new(
                 conn.clone(),
                 config.clone(),
             ),
